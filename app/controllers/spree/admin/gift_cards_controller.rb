@@ -3,7 +3,7 @@ class Spree::Admin::GiftCardsController < Spree::Admin::BaseController
   before_filter :load_user, only: [:lookup ]
 
   def index
-    @gift_cards = Spree::VirtualGiftCard.page(params[:page])
+    @gift_cards = Spree::VirtualGiftCard.order(id: :desc).page(params[:page])
   end
 
   def show
