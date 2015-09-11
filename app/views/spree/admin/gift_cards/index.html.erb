@@ -1,1 +1,6 @@
 <%= render partial: 'lookup_form' %>
+<% if @gift_cards.any? %>
+  <%= paginate @gift_cards %>
+  <%= render partial: 'gift_cards', object: @gift_cards %>
+  <%= paginate @gift_cards %>
+<% end %>
