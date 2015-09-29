@@ -15,10 +15,10 @@
         <td class="align-center"><%= gift_card.formatted_redemption_code %></td>
         <td class="align-center"><%= number_to_currency(gift_card.amount) %></td>
         <td class="align-center"><%= gift_card.purchaser_email %></td>
-        <td class="align-center"><%= gift_card.created_at.localtime.strftime("%F %I:%M%p") %></td>
+        <td class="align-center"><%= gift_card.created_at.strftime("%F %I:%M%p") %></td>
         <% if gift_card.redeemed? %>
           <td class="align-center"><%= gift_card.redeemer_email %></td>
-          <td class="align-center"><%= gift_card.redeemed_at.localtime.strftime("%F %I:%M%p") %></td>
+          <td class="align-center"><%= gift_card.redeemed_at.strftime("%F %I:%M%p") %></td>
         <% else %>
           <td class="align-center"></td>
           <td class="align-center"></td>
