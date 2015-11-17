@@ -5,7 +5,7 @@ describe Spree::VirtualGiftCard do
   let!(:credit_type) { create(:secondary_credit_type, name: "Non-expiring") }
 
   context 'validations' do
-    let(:invalid_gift_card) { Spree::VirtualGiftCard.new(amount: 0, currency: 'USD', purchaser: create(:user)) }
+    let(:invalid_gift_card) { Spree::VirtualGiftCard.new(amount: 0, currency: 'USD', purchaser_email: generate(:random_email)) }
 
     context 'given an amount less than one' do
       it 'is not valid' do
@@ -20,7 +20,7 @@ describe Spree::VirtualGiftCard do
   end
 
   context 'before create callbacks' do
-    let(:gift_card) { Spree::VirtualGiftCard.new(amount: 20, currency: 'USD', purchaser: create(:user), line_item: create(:line_item) ) }
+    let(:gift_card) { Spree::VirtualGiftCard.new(amount: 20, currency: 'USD', purchaser_email: generate(:random_email), line_item: create(:line_item) ) }
     subject { gift_card.save }
 
     context 'a redemption code is set already' do
@@ -87,7 +87,7 @@ describe Spree::VirtualGiftCard do
   end
 
   describe '#redeem' do
-    let(:gift_card) { Spree::VirtualGiftCard.create(amount: 20, currency: 'USD', purchaser: create(:user), line_item: create(:line_item)) }
+    let(:gift_card) { Spree::VirtualGiftCard.create(amount: 20, currency: 'USD', purchaser_email: generate(:random_email), line_item: create(:line_item)) }
     let(:redeemer) { create(:user) }
     subject { gift_card.redeem(redeemer) }
 
@@ -154,7 +154,7 @@ describe Spree::VirtualGiftCard do
 
       it 'sets the redeeming user association' do
         subject
-        expect(gift_card.redeemer).to be_present
+        expect(gift_card.redeemer_email).to be_present
       end
 
       it 'sets the admin as the store credit event originator' do

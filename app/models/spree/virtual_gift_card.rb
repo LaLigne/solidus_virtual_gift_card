@@ -2,15 +2,12 @@ class Spree::VirtualGiftCard < ActiveRecord::Base
   include ActionView::Helpers::NumberHelper
 
   belongs_to :store_credit, class_name: 'Spree::StoreCredit'
-  belongs_to :purchaser, class_name: 'Spree::User'
-  belongs_to :redeemer, class_name: 'Spree::User'
   belongs_to :line_item, class_name: 'Spree::LineItem'
   before_create :set_redemption_code, unless: -> { redemption_code }
 
-
   validates :amount, numericality: { greater_than: 0 }
   validates_uniqueness_of :redemption_code, conditions: -> { where(redeemed_at: nil) }
-  validates_presence_of :purchaser_id
+  validates_presence_of :purchaser_email
 
   scope :unredeemed, -> { where(redeemed_at: nil) }
   scope :by_redemption_code, -> (redemption_code) { where(redemption_code: redemption_code) }
@@ -30,7 +27,7 @@ class Spree::VirtualGiftCard < ActiveRecord::Base
       action_originator: self,
       category: store_credit_category,
     })
-    self.update_attributes( redeemed_at: Time.now, redeemer: redeemer )
+    self.update_attributes( redeemed_at: Time.now, redeemer_email: redeemer.email )
   end
 
   def memo

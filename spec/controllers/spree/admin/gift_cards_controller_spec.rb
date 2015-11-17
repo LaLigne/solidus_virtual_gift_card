@@ -74,9 +74,9 @@ describe Spree::Admin::GiftCardsController do
         expect(gift_card.reload.redeemed?).to eq true
       end
 
-      it "sets the redeemer to the correct user" do
+      it "sets the redeemer_email to the correct email" do
         subject
-        expect(gift_card.reload.redeemer).to eq user
+        expect(gift_card.reload.redeemer_email).to eq user.email
       end
 
       it "creates store credit for the user" do
