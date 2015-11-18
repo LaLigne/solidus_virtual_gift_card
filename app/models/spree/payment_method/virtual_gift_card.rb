@@ -9,7 +9,8 @@ module Spree
     end
 
     def create_profile(payment)
-      virtual_gift_card = Spree::VirtualGiftCard.find_by redemption_code: payment.source.redemption_code
+      redemption_code = Spree::RedemptionCodeGenerator.format_redemption_code_for_lookup(payment.source.redemption_code)
+      virtual_gift_card = Spree::VirtualGiftCard.find_by redemption_code: redemption_code
 
       if virtual_gift_card
         payment.source.update_attributes!({
