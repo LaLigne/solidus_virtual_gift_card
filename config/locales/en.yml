@@ -19,3 +19,24 @@ en:
         your_gift_card_code: "Here is your gift card code"
         gift_card_code: "Gift card code: %{code}"
         subject: "Your gift card code"
+    gift_card:
+      currency_mismatch: "Gift card currency does not match order currency"
+      display_action:
+        adjustment: Adjustment
+        allocation: Added
+        capture: Used
+        credit: Credit
+        invalidate: Invalidated
+        void: Credit
+        admin:
+          authorize: "Authorized"
+          eligible: "Eligibility Verified"
+          void: "Voided"
+      insufficient_authorized_amount: "Unable to capture more than authorized amount"
+      insufficient_funds: "Gift card amount remaining is not sufficient"
+      invalid_code: "Invalid redemption code"
+      successful_action: "Successful gift card %{action}"
+      unable_to_credit: "Unable to credit code: %{auth_code}"
+      unable_to_find: "Could not find gift card"
+      unable_to_find_for_action: "Could not find gift card for auth code: %{auth_code} for action: %{action}"
+      unable_to_void: "Unable to void code: %{auth_code}"
