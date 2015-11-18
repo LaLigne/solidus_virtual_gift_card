@@ -4,7 +4,7 @@ FactoryGirl.define do
   end
 
   factory :virtual_gift_card, class: Spree::VirtualGiftCard do
-    association :purchaser, factory: :user
+    purchaser_email { generate(:random_email) }
     association :line_item, factory: :line_item
 
     amount 25.0

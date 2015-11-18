@@ -17,7 +17,7 @@ describe Spree::Order do
       end
 
       it 'sets the purchaser, amount, and currency' do
-        expect(Spree::VirtualGiftCard).to receive(:create!).exactly(3).times.with(amount: line_item.price, currency: line_item.currency, purchaser: order.user, line_item: line_item)
+        expect(Spree::VirtualGiftCard).to receive(:create!).exactly(3).times.with(amount: line_item.price, currency: line_item.currency, purchaser_email: order.email, line_item: line_item)
         subject
       end
     end

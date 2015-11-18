@@ -1,36 +1,36 @@
 class Spree::VirtualGiftCard < ActiveRecord::Base
   include ActionView::Helpers::NumberHelper
 
-  belongs_to :store_credit, class_name: 'Spree::StoreCredit'
-  belongs_to :purchaser, class_name: 'Spree::User'
-  belongs_to :redeemer, class_name: 'Spree::User'
-  belongs_to :line_item, class_name: 'Spree::LineItem'
-  before_create :set_redemption_code, unless: -> { redemption_code }
+  VOID_ACTION       = 'void'
+  CREDIT_ACTION     = 'credit'
+  CAPTURE_ACTION    = 'capture'
+  ELIGIBLE_ACTION   = 'eligible'
+  AUTHORIZE_ACTION  = 'authorize'
+  ALLOCATION_ACTION = 'allocation'
+  ADJUSTMENT_ACTION = 'adjustment'
+  INVALIDATE_ACTION = 'invalidate'
 
+  belongs_to :store_credit, class_name: 'Spree::StoreCredit'
+  belongs_to :line_item, class_name: 'Spree::LineItem'
+  has_many :virtual_gift_card_events
+
+  before_create :set_redemption_code, unless: -> { redemption_code }
+  after_save :store_event
 
   validates :amount, numericality: { greater_than: 0 }
   validates_uniqueness_of :redemption_code, conditions: -> { where(redeemed_at: nil) }
-  validates_presence_of :purchaser_id
+  validates_presence_of :purchaser_email
 
   scope :unredeemed, -> { where(redeemed_at: nil) }
   scope :by_redemption_code, -> (redemption_code) { where(redemption_code: redemption_code) }
 
+  attr_accessor :action, :action_amount, :action_originator, :action_authorization_code, :update_reason
+
+  extend Spree::DisplayMoney
+  money_methods :amount, :amount_used, :amount_authorized
+
   def redeemed?
     redeemed_at.present?
-  end
-
-  def redeem(redeemer)
-    return false if redeemed?
-    create_store_credit!({
-      amount: amount,
-      currency: currency,
-      memo: memo,
-      user: redeemer,
-      created_by: redeemer,
-      action_originator: self,
-      category: store_credit_category,
-    })
-    self.update_attributes( redeemed_at: Time.now, redeemer: redeemer )
   end
 
   def memo
@@ -53,6 +53,168 @@ class Spree::VirtualGiftCard < ActiveRecord::Base
     Spree::VirtualGiftCard.unredeemed.by_redemption_code(redemption_code).first
   end
 
+  def amount_remaining
+    return 0.0.to_d if invalidated?
+    amount - amount_used - amount_authorized
+  end
+
+  def authorize(amount, order_currency, options={})
+    authorization_code = options[:action_authorization_code]
+    if authorization_code
+      if virtual_gift_card_events.find_by(action: AUTHORIZE_ACTION, authorization_code: authorization_code)
+        # Don't authorize again on capture
+        return true
+      end
+    else
+      authorization_code = generate_authorization_code
+    end
+
+    if validate_authorization(amount, order_currency)
+      update_attributes!({
+        action: AUTHORIZE_ACTION,
+        action_amount: amount,
+        action_originator: options[:action_originator],
+        action_authorization_code: authorization_code,
+
+        amount_authorized: self.amount_authorized + amount,
+      })
+      authorization_code
+    else
+      errors.add(:base, Spree.t('gift_card.insufficient_authorized_amount'))
+      false
+    end
+  end
+
+  def validate_authorization(amount, order_currency)
+    if amount_remaining.to_d < amount.to_d
+      errors.add(:base, Spree.t('gift_card.insufficient_funds'))
+    elsif currency != order_currency
+      errors.add(:base, Spree.t('gift_card.currency_mismatch'))
+    end
+
+    return errors.blank?
+  end
+
+  def capture(amount, authorization_code, order_currency, options={})
+    return false unless authorize(amount, order_currency, action_authorization_code: authorization_code)
+    auth_event = virtual_gift_card_events.find_by!(action: AUTHORIZE_ACTION, authorization_code: authorization_code)
+
+    if amount <= auth_event.amount
+      if currency != order_currency
+        errors.add(:base, Spree.t('gift_card.currency_mismatch'))
+        false
+      else
+        update_attributes!({
+          action: CAPTURE_ACTION,
+          action_amount: amount,
+          action_originator: options[:action_originator],
+          action_authorization_code: authorization_code,
+
+          amount_used: self.amount_used + amount,
+          amount_authorized: self.amount_authorized - auth_event.amount,
+        })
+        authorization_code
+      end
+    else
+      errors.add(:base, Spree.t('gift_card.insufficient_authorized_amount'))
+      false
+    end
+  end
+
+  def void(authorization_code, options={})
+    if auth_event = virtual_gift_card_events.find_by(action: AUTHORIZE_ACTION, authorization_code: authorization_code)
+      self.update_attributes!({
+        action: VOID_ACTION,
+        action_amount: auth_event.amount,
+        action_authorization_code: authorization_code,
+        action_originator: options[:action_originator],
+
+        amount_authorized: amount_authorized - auth_event.amount,
+      })
+      true
+    else
+      errors.add(:base, Spree.t('gift_card.unable_to_void', auth_code: authorization_code))
+      false
+    end
+  end
+
+  def credit(amount, authorization_code, order_currency, options={})
+    # Find the amount related to this authorization_code in order to add the store credit back
+    capture_event = virtual_gift_card_events.find_by(action: CAPTURE_ACTION, authorization_code: authorization_code)
+
+    if currency != order_currency  # sanity check to make sure the order currency hasn't changed since the auth
+      errors.add(:base, Spree.t('gift_card.currency_mismatch'))
+      false
+    elsif capture_event && amount <= capture_event.amount
+      action_attributes = {
+        action: CREDIT_ACTION,
+        action_amount: amount,
+        action_originator: options[:action_originator],
+        action_authorization_code: authorization_code,
+      }
+      create_credit_record(amount, action_attributes)
+      true
+    else
+      errors.add(:base, Spree.t('gift_card.unable_to_credit', auth_code: authorization_code))
+      false
+    end
+  end
+
+  def actions
+    [CAPTURE_ACTION, VOID_ACTION, CREDIT_ACTION]
+  end
+
+  def can_capture?(payment)
+    payment.pending? || payment.checkout?
+  end
+
+  def can_void?(payment)
+    payment.pending?
+  end
+
+  def can_credit?(payment)
+    payment.completed? && payment.credit_allowed > 0
+  end
+
+  def generate_authorization_code
+    "#{self.id}-VGC-#{Time.now.utc.strftime("%Y%m%d%H%M%S%6N")}"
+  end
+
+  def editable?
+    !amount_remaining.zero?
+  end
+
+  def invalidateable?
+    !invalidated? && amount_authorized.zero?
+  end
+
+  def invalidated?
+    !!invalidated_at
+  end
+
+  def update_amount(amount, reason, user_performing_update)
+    previous_amount = self.amount
+    self.amount = amount
+    self.action_amount = self.amount - previous_amount
+    self.action = ADJUSTMENT_ACTION
+    self.update_reason = reason
+    self.action_originator = user_performing_update
+    save
+  end
+
+  def invalidate(reason, user_performing_invalidation)
+    if invalidateable?
+      self.action = INVALIDATE_ACTION
+      self.update_reason = reason
+      self.action_originator = user_performing_invalidation
+      self.invalidated_at = Time.now
+      save
+    else
+      errors.add(:invalidated_at, Spree.t("store_credit.errors.cannot_invalidate_uncaptured_authorization"))
+      return false
+    end
+  end
+
   private
 
   def set_redemption_code
@@ -71,5 +233,74 @@ class Spree::VirtualGiftCard < ActiveRecord::Base
 
   def duplicate_redemption_code?(redemption_code)
     Spree::VirtualGiftCard.active_by_redemption_code(redemption_code)
+  end
+
+  def create_credit_record(amount, action_attributes={})
+    # Setting credit_to_new_allocation to true will create a new allocation anytime #credit is called
+    # If it is not set, it will update the store credit's amount in place
+    self.amount_used = amount_used - amount
+    credit = self
+
+    credit.assign_attributes(action_attributes)
+    credit.save!
+  end
+
+  def create_credit_record_params(amount)
+    {
+      amount: amount,
+      user_id: self.user_id,
+      category_id: self.category_id,
+      created_by_id: self.created_by_id,
+      currency: self.currency,
+      type_id: self.type_id,
+      memo: credit_allocation_memo,
+    }
+  end
+
+  def credit_allocation_memo
+    Spree.t("store_credit.credit_allocation_memo", id: self.id)
+  end
+
+  def store_event
+    return unless amount_changed? || amount_used_changed? || amount_authorized_changed? || [ELIGIBLE_ACTION, INVALIDATE_ACTION].include?(action)
+
+    event = if action
+      virtual_gift_card_events.build(action: action)
+    else
+      virtual_gift_card_events.where(action: ALLOCATION_ACTION).first_or_initialize
+    end
+
+    event.update_attributes!({
+      amount: action_amount || amount,
+      authorization_code: action_authorization_code || event.authorization_code || generate_authorization_code,
+      originator: action_originator,
+      update_reason: update_reason,
+    })
+  end
+
+  def amount_used_less_than_or_equal_to_amount
+    return true if amount_used.nil?
+
+    if amount_used > amount
+      errors.add(:amount_used, Spree.t('admin.store_credits.errors.amount_used_cannot_be_greater'))
+    end
+  end
+
+  def amount_authorized_less_than_or_equal_to_amount
+    if (amount_used + amount_authorized) > amount
+      errors.add(:amount_authorized, Spree.t('admin.store_credits.errors.amount_authorized_exceeds_total_credit'))
+    end
+  end
+
+  def validate_category_unchanged
+    if category_id_changed?
+      errors.add(:category, Spree.t('admin.store_credits.errors.cannot_be_modified'))
+    end
+  end
+
+  def validate_no_amount_used
+    if amount_used > 0
+      errors.add(:amount_used, 'is greater than zero. Can not delete store credit')
+    end
   end
 end
